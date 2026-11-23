@@ -1,0 +1,6 @@
+[Desktop Entry]
+Type=Application
+Name=Card Pi
+Exec=/usr/bin/card-pi
+Icon=share/images/card-pi.png
+Terminal=false

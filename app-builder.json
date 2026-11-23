@@ -1,0 +1,46 @@
+{
+  "package_name": "card-pi",
+  "version": "0.1.0~beta18",
+  "app_name": "Card Pi",
+  "bin_name": "card-pi",
+  "description": "Pi coding agent frontend for CardputerZero",
+  "store": {
+    "summary": "Pi coding agent for CardputerZero with offline Pinyin and session management.",
+    "description": "Card Pi is an independent frontend for the Pi coding agent on the CardputerZero (ARM64). Open a project folder, resume or rename a session, switch models, and browse Markdown chat history on the 320 × 170 display.\n\nCard Pi runs the original Pi CLI directly and uses your existing Pi configuration. The built-in native terminal gives you access to the full Pi interface, including slash commands such as /login and /settings. If Pi is missing, Card Pi guides you through installation. The app integrates the Rime input method engine for offline Chinese Pinyin, with Simplified and Traditional Chinese output. Card Pi’s own interface is available in Simplified Chinese and English.",
+    "screenshots": ["screenshots/chat.png"],
+    "icon": "packaging/card-pi-store.png",
+    "share_code": "MPIC",
+    "categories": ["Development", "AI"],
+    "license": "MIT",
+    "author": {
+      "github": "Moeyuuko",
+      "display_name": "Moeyuuko"
+    },
+    "permissions": {
+      "camera": false,
+      "microphone": false,
+      "imu": false,
+      "network": true,
+      "additional_hardware": false,
+      "background_service": false,
+      "external_display": false
+    },
+    "locales": {
+      "en": {
+        "title": "Card Pi",
+        "summary": "Pi coding agent for CardputerZero with offline Pinyin and session management.",
+        "description": "Card Pi is an independent frontend for the Pi coding agent on the CardputerZero (ARM64). Open a project folder, resume or rename a session, switch models, and browse Markdown chat history on the 320 × 170 display.\n\nCard Pi runs the original Pi CLI directly and uses your existing Pi configuration. The built-in native terminal gives you access to the full Pi interface, including slash commands such as /login and /settings. If Pi is missing, Card Pi guides you through installation. The app integrates the Rime input method engine for offline Chinese Pinyin, with Simplified and Traditional Chinese output. Card Pi’s own interface is available in Simplified Chinese and English."
+      },
+      "zh-CN": {
+        "title": "Card Pi",
+        "summary": "适合 CardputerZero 小屏幕的 Pi 编程助手界面，支持离线拼音和会话管理。",
+        "description": "Card Pi 是面向 CardputerZero（ARM64）的独立 Pi 编程助手界面。可选择项目目录、恢复或重命名会话、切换模型，并在 320 × 170 小屏上浏览 Markdown 聊天记录。\n\nCard Pi 直接调用原版 Pi CLI，沿用已有的 Pi 配置。可随时进入应用内的原生终端，使用原版 Pi 的完整界面和功能，包括 /login、/settings 等斜杠命令。设备缺少 Pi 时，应用会引导安装。Card Pi 集成 Rime 中州韵输入法引擎，支持离线中文拼音和简繁输出切换，应用界面支持简体中文和英语。"
+      },
+      "ja": {
+        "title": "Card Pi",
+        "summary": "CardputerZero の小画面に対応した Pi 用フロントエンド。オフラインの中国語ピンイン入力とセッション管理が可能。",
+        "description": "Card Pi は、CardputerZero（ARM64）向けの独立した Pi コーディングエージェント用フロントエンドです。プロジェクトフォルダーの選択、セッションの再開や名前変更、モデルの切り替えができ、320 × 170 の画面で Markdown 形式のチャット履歴を閲覧できます。\n\nCard Pi はオリジナルの Pi CLI を直接起動し、既存の Pi 設定をそのまま使用します。アプリ内のターミナルから Pi 本来の画面と機能を利用でき、/login や /settings などのスラッシュコマンドも実行できます。Pi が未インストールの場合はインストール手順を案内します。Rime（中州韻）入力エンジンを搭載し、オフラインで中国語のピンイン入力と簡体字・繁体字の切り替えができます。Card Pi の表示言語は中国語（簡体字）と英語です。"
+      }
+    }
+  }
+}

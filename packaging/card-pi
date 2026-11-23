@@ -1,0 +1,4 @@
+#!/bin/sh
+export PYTHONPATH=/usr/lib/card-pi
+export PYTHONDONTWRITEBYTECODE=1
+exec /usr/bin/python3 -m card_pi "$@"

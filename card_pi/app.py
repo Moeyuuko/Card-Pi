@@ -7,7 +7,7 @@ import os
 from pathlib import Path
 from queue import Empty, SimpleQueue
 import signal
-from threading import Event, Thread
+from threading import Thread
 from time import monotonic
 
 from PIL import Image, ImageDraw, ImageFont
@@ -16,12 +16,12 @@ from .device_screen import (
     BACKSPACE, DOWN, ENTER, ESC, KEY_F, KEY_X, LEFT, RIGHT, TAB, UP, KeyPress, keyboard_fds,
     open_display, read_keys,
 )
-from .i18n import installation_message, translate
+from .i18n import translate
 from .ime import Pinyin, PinyinOptions
 from .markdown import message_blocks, wrap_runs
 from .native import NativePi, TerminalProcess
 from .pi import (
-    CONFIG, HOME, RPC, detect, install, load_settings, message_text,
+    CONFIG, HOME, RPC, detect, installer_command, load_settings, message_text,
     purge_session, restore_session, save_settings, session_list, trash_session, validate_pi,
 )
 from .version import VERSION
@@ -181,7 +181,7 @@ class Screen:
         if app.page == "native":
             self.terminal(draw, app.native, app.terminal_size(), app.tr("Pi 原生命令   Ctrl+Q 返回 Card Pi"))
             return image
-        if app.page == "core_update":
+        if app.page in {"core_update", "core_install"}:
             self.terminal(draw, app.updater, app.terminal_size(), app.update_status, show_cursor=not app.update_finished)
             return image
         draw.rectangle((0, 0, WIDTH, 24), fill=PANEL)
@@ -236,18 +236,16 @@ class Screen:
     def menu(self, draw, app):
         if app.page == "install":
             draw.text((9, 41), app.tr("安装官方 Pi · 将联网下载"), font=self.font, fill=TEXT)
-            draw.text((9, 63), app.tr("pi.dev · 无兼容 Node 时下载 ARM64 发布包"),
+            draw.text((9, 63), app.tr("pi.dev · 按官方安装器提示操作"),
                       font=self.small, fill=DIM)
             for i, line in enumerate(list(self.lines(app.notice))[:3]):
                 draw.text((9, 88 + i * 16), line, font=self.font, fill=TEXT)
-            if not app.working:
-                draw.text((9, 137), app.tr("OK 安装 · Esc 返回"), font=self.small, fill=DIM)
-                draw.rectangle((0, 149, WIDTH, HEIGHT), fill=PANEL)
-                for x, label in ((161, app.tr("6 安装")), (217, app.tr("7 指定 Pi")), (273, app.tr("8 重查"))):
-                    draw.text((x, 157), label, font=self.small, anchor="mm", fill=TEXT)
-                    draw.line((x, 166, x, 169), fill=ACCENT)
-                return
-            label = app.tr("Esc 取消安装   长按 Esc 退出")
+            draw.text((9, 137), app.tr("OK 安装 · Esc 返回"), font=self.small, fill=DIM)
+            draw.rectangle((0, 149, WIDTH, HEIGHT), fill=PANEL)
+            for x, label in ((161, app.tr("6 安装")), (217, app.tr("7 指定 Pi")), (273, app.tr("8 重查"))):
+                draw.text((x, 157), label, font=self.small, anchor="mm", fill=TEXT)
+                draw.line((x, 166, x, 169), fill=ACCENT)
+            return
         elif app.page == "check":
             draw.text((9, 49), app.tr("正在检查 Pi…"), font=self.font, fill=TEXT)
             label = app.tr("Esc 返回")
@@ -374,8 +372,6 @@ class App:
         self.model = None
         self.cwd = self.session = self.session_file = None
         self.session_name = ""
-        self.install_cancel = Event()
-        self.install_thread = None
         self.page = "check"
         self.rows = []
         self.selected = 0
@@ -441,9 +437,6 @@ class App:
             except Empty:
                 break
             changed = True
-            if action == "progress":
-                self.notice = installation_message(result, self.settings.get("language"))
-                continue
             if action != "ime":
                 self.working = False
             if action == "core_update":
@@ -465,15 +458,13 @@ class App:
             else:
                 if action == "check" and result:
                     self.core, error = result
-                elif action == "install":
-                    self.core = result
                 if self.core:
                     self.settings["core"] = self.core[0]
                     self.store()
                     self.home()
                 else:
                     self.page = "install"
-                    self.notice = installation_message(error, self.settings.get("language")) if error else self.tr("未检测到 Pi。按安装开始。")
+                    self.notice = error or self.tr("未检测到 Pi。按安装开始。")
         if self.native:
             changed = self.native.update() or changed
             if self.native.process.poll() is not None:
@@ -485,7 +476,13 @@ class App:
             if status is not None:
                 self.updater.update()
                 changed = True
-                if status == 0:
+                if self.page == "core_install":
+                    self.update_finished = True
+                    self.update_status = (
+                        self.tr("安装器已退出 · Esc 检查 Pi") if status == 0 else
+                        self.tr("安装器退出（{}）· Esc 检查 Pi").format(status)
+                    )
+                elif status == 0:
                     self.update_status = self.tr("正在检查 Pi 版本…")
                     path = self.core[0]
                     self.background("core_update", lambda: validate_pi(path))
@@ -831,6 +828,18 @@ class App:
                 self.detail(str(exc), "pi_settings" if command else "home")
             return
         self.page = "native"
+
+    def start_core_install(self):
+        args, env = installer_command()
+        cols, rows = self.screen.terminal_dimensions(self.terminal_size())
+        try:
+            self.updater = TerminalProcess(args, HOME, env, cols=cols, rows=rows)
+        except (OSError, ImportError) as exc:
+            self.notice = str(exc)
+            return
+        self.update_finished = False
+        self.update_status = self.tr("官方安装器 · Ctrl+C 取消")
+        self.page = "core_install"
 
     def start_core_update(self):
         path, _, env = self.core
@@ -1288,7 +1297,7 @@ class App:
             self.insert(text)
 
     def handle(self, key):
-        if key.alt and self.page != "native":
+        if key.alt and self.page not in {"native", "core_install"}:
             return
         if self.page == "native":
             if key.control and key.code == CTRL_Q:
@@ -1307,23 +1316,22 @@ class App:
             self.scroll_history(key)
         elif self.page == "chat":
             self.edit_chat(key)
+        elif self.page == "core_install":
+            if self.update_finished and key.code == ESC:
+                self.updater.close()
+                self.updater = None
+                self.check()
+            elif not self.update_finished:
+                self.updater.key(key)
         elif self.page == "install":
-            if self.working and key.code == ESC:
-                self.install_cancel.set()
-                self.notice = self.tr("正在取消安装…")
-            elif not self.working:
-                if (key.code == ENTER or key.text == "6") and not key.repeat:
-                    self.notice = self.tr("正在准备安装…")
-                    self.install_cancel.clear()
-                    self.install_thread = self.background("install", lambda: install(
-                        lambda status: self.results.put(("progress", status, "")),
-                        self.install_cancel))
-                elif key.text == "7":
-                    self.edit("binary", str(HOME) + "/", self.tr("Pi 可执行文件的绝对路径"))
-                elif key.text == "8":
-                    self.check()
-                elif key.code == ESC:
-                    self.active = False
+            if (key.code == ENTER or key.text == "6") and not key.repeat:
+                self.start_core_install()
+            elif key.text == "7":
+                self.edit("binary", str(HOME) + "/", self.tr("Pi 可执行文件的绝对路径"))
+            elif key.text == "8":
+                self.check()
+            elif key.code == ESC:
+                self.active = False
         elif self.page == "check":
             if key.code == ESC:
                 self.active = False
@@ -1600,7 +1608,7 @@ def main():
                 frame = (cycle, max(0, int((elapsed - TICKER_PERIOD + TICKER_SLIDE) / 0.035)))
                 if frame != ticker_frame:
                     ticker_frame = frame
-                    if app.page not in {"native", "core_update", "history"}:
+                    if app.page not in {"native", "core_update", "core_install", "history"}:
                         dirty = True
                 if app.update():
                     dirty = True
@@ -1645,9 +1653,6 @@ def main():
             app.native.close()
         if app.updater:
             app.updater.close()
-        app.install_cancel.set()
-        if app.install_thread:
-            app.install_thread.join(timeout=0.8)
         app.stop()
         if app.ime:
             app.ime.close()

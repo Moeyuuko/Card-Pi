@@ -14,12 +14,11 @@ EN = {
     "紧凑": "Compact",
     "宽松": "Relaxed",
     "安装官方 Pi · 将联网下载": "Install Pi from its official source",
-    "pi.dev · 无兼容 Node 时下载 ARM64 发布包": "pi.dev · ARM64 build if Node is unavailable",
+    "pi.dev · 按官方安装器提示操作": "pi.dev · Follow the official installer prompts",
     "OK 安装 · Esc 返回": "OK Install · Esc Back",
     "6 安装": "6 Install",
     "7 指定 Pi": "7 Locate",
     "8 重查": "8 Check",
-    "Esc 取消安装   长按 Esc 退出": "Esc Cancel   Hold Esc to exit",
     "正在检查 Pi…": "Checking for Pi…",
     "Esc 返回": "Esc Back",
     "OK 确认   Esc 取消   Ctrl+空格 中英": "OK Confirm   Esc Cancel   Ctrl+Space Input",
@@ -126,31 +125,15 @@ EN = {
     "会话列表": "Session list",
     "查看最近工具输出": "View recent tool output",
     "返回项目首页": "Return home",
-    "正在取消安装…": "Canceling installation…",
-    "正在准备安装…": "Preparing to install…",
     "Pi 可执行文件的绝对路径": "Absolute path to the Pi executable",
     "绝对路径或 ~/…": "Absolute path or ~/…",
     "输入该会话的新名称": "Enter a new session name",
     "输入新的会话名称": "Enter a new session name",
     "当前没有工具输出": "No recent tool output",
     "请先按 Esc 停止当前任务": "Press Esc to stop the active run first",
-    "正在运行 Pi 官方安装器…": "Running the official Pi installer…",
-    "无法验证 Pi 官方安装脚本地址或格式": "Could not verify the Pi installer URL or format",
-    "已取消安装": "Installation canceled",
-    "Pi 官方安装器超时，请检查网络": "Pi installer timed out. Check your connection.",
-    "Pi 官方安装失败：": "Official Pi installation failed: ",
-    "安装完成后找不到 Pi，请指定可执行文件路径": "Pi was not found after installation. Locate the executable.",
-    "Pi 安装需要 ARM64 Linux": "Pi installation requires ARM64 Linux",
-    "请以普通用户安装 Pi": "Install Pi with a regular user account",
-    "另一个 Card Pi 正在安装": "Another Card Pi process is installing Pi",
-    "请先腾出至少 220 MiB 磁盘空间": "Free at least 220 MiB of disk space",
-    "正在下载 Pi…": "Downloading Pi…",
-    "Pi 下载需要 HTTPS": "Pi download requires HTTPS",
-    "Pi 下载文件过大": "Pi download is too large",
-    "Pi 发布包校验失败": "Pi package checksum failed",
-    "正在解压和验证 Pi…": "Extracting and verifying Pi…",
-    "发布包中找不到 Pi": "Pi executable missing from the archive",
-    "Pi 发布包版本与预期不一致": "Unexpected Pi package version",
+    "官方安装器 · Ctrl+C 取消": "Official installer · Ctrl+C Cancel",
+    "安装器已退出 · Esc 检查 Pi": "Installer exited · Esc Check Pi",
+    "安装器退出（{}）· Esc 检查 Pi": "Installer exited ({}) · Esc Check Pi",
 }
 
 
@@ -158,11 +141,3 @@ def translate(text, language):
     if language != "en":
         return text
     return EN.get(text, text)
-
-
-def installation_message(text, language):
-    if language == "en":
-        for prefix in ("正在下载 Pi…", "Pi 官方安装失败："):
-            if text.startswith(prefix):
-                return EN[prefix] + text[len(prefix):]
-    return translate(text, language)

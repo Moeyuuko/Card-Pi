@@ -1,31 +1,19 @@
 """Pi executable discovery, installation, sessions and JSONL transport."""
-from contextlib import contextmanager
-from fcntl import LOCK_EX, LOCK_NB, flock
-import hashlib
 import json
 import os
 from pathlib import Path
-import platform
 import re
 from queue import SimpleQueue
 import shutil
 import signal
 import subprocess
-import tarfile
 from tempfile import TemporaryDirectory
-from threading import Event, Thread
-from time import monotonic
-from urllib.request import urlopen
+from threading import Thread
 from uuid import uuid4
 
 HOME = Path.home()
 CONFIG = Path(os.environ.get("XDG_CONFIG_HOME") or HOME / ".config") / "card-pi"
-DATA = Path(os.environ.get("XDG_DATA_HOME") or HOME / ".local/share") / "card-pi"
 AGENT = Path(os.environ.get("PI_CODING_AGENT_DIR") or HOME / ".pi/agent")
-VERSION = "1.6.0"
-RELEASE = f"https://github.com/earendil-works/pi/releases/download/v{VERSION}/pi-linux-arm64.tar.gz"
-SHA256 = "5404547b9739be596d50ae7142c52535899e8e7dd37a7bace9be593e0355b468"
-MANAGED = DATA / f"pi-{VERSION}"
 INSTALLER = "https://pi.dev/install.sh"
 
 
@@ -42,7 +30,7 @@ def validate_pi(path):
 
 def detect(custom=""):
     candidates = [custom, shutil.which("pi"), HOME / ".local/bin/pi",
-                  AGENT / "bin/pi", HOME / ".pi/bin/pi", MANAGED / "pi"]
+                  AGENT / "bin/pi", HOME / ".pi/bin/pi"]
     errors = []
     for path in dict.fromkeys(p for p in candidates if p):
         if Path(path).expanduser().is_file():
@@ -53,154 +41,21 @@ def detect(custom=""):
     return None, errors[0] if errors else ""
 
 
-@contextmanager
-def install_lock():
-    DATA.mkdir(parents=True, exist_ok=True)
-    with (DATA / "install.lock").open("a") as lock:
-        try:
-            flock(lock, LOCK_EX | LOCK_NB)
-        except BlockingIOError as exc:
-            raise RuntimeError("另一个 Card Pi 正在安装") from exc
-        yield
-
-
-def installer_environment():
+def installer_command():
     env = dict(os.environ)
     env["PATH"] = f"{HOME / '.local/bin'}:{AGENT / 'bin'}:{env.get('PATH', os.defpath)}"
     for name in ("PI_INSTALLER_API_BASE", "PI_MANAGED_INSTALL_ROOT", "PI_MANAGED_INSTALL"):
         env.pop(name, None)
-    return env
-
-
-def node_available(env):
-    try:
-        node = subprocess.run(
-            ["node", "-e", "const [major, minor] = process.versions.node.split('.').map(Number); "
-             "process.exit(major > 22 || (major === 22 && minor >= 19) ? 0 : 1)"],
-            env=env, capture_output=True, timeout=5,
-        )
-        npm = subprocess.run(["npm", "--version"], env=env, capture_output=True, timeout=5)
-        return node.returncode == npm.returncode == 0
-    except (OSError, subprocess.TimeoutExpired):
-        return False
-
-
-def official_install(env, progress, cancel):
-    progress("正在运行 Pi 官方安装器…")
-    with urlopen(INSTALLER, timeout=20) as response:
-        script = response.read(512 * 1024 + 1)
-        if response.geturl() != INSTALLER or len(script) > 512 * 1024 or not script.startswith(b"#!/bin/sh"):
-            raise RuntimeError("无法验证 Pi 官方安装脚本地址或格式")
-    if cancel.is_set():
-        raise RuntimeError("已取消安装")
-    installer_env = dict(env, TERM="dumb", npm_config_fetch_retries="1",
-                         npm_config_fetch_timeout="30000")
-    with TemporaryDirectory(prefix="installer-", dir=DATA) as directory:
-        path = Path(directory) / "install.sh"
-        path.write_bytes(script)
-        with (Path(directory) / "output").open("w+b") as log:
-            process = subprocess.Popen(["/bin/sh", str(path)], cwd=HOME, env=installer_env,
-                                       start_new_session=True, stdin=subprocess.DEVNULL,
-                                       stdout=log, stderr=subprocess.STDOUT)
-            deadline = monotonic() + 240
-            while process.poll() is None:
-                if cancel.wait(0.15) or monotonic() >= deadline:
-                    try:
-                        os.killpg(process.pid, signal.SIGKILL)
-                    except ProcessLookupError:
-                        pass
-                    process.wait()
-                    if cancel.is_set():
-                        raise RuntimeError("已取消安装")
-                    raise RuntimeError("Pi 官方安装器超时，请检查网络")
-            if process.returncode:
-                log.seek(0, os.SEEK_END)
-                log.seek(max(0, log.tell() - 4096))
-                lines = [line.strip() for line in log.read().decode("utf-8", "replace").splitlines()
-                         if line.strip()]
-                raise RuntimeError("Pi 官方安装失败：" + (" / ".join(lines[-3:]) or str(process.returncode)))
-    core, error = detect()
-    if not core:
-        raise RuntimeError(error or "安装完成后找不到 Pi，请指定可执行文件路径")
-    return core
-
-
-def install(progress, cancel=None):
-    """Install from official Pi distribution channels under the current account."""
-    if platform.system() != "Linux" or platform.machine() not in {"aarch64", "arm64"}:
-        raise RuntimeError("Pi 安装需要 ARM64 Linux")
-    if os.geteuid() == 0:
-        raise RuntimeError("请以普通用户安装 Pi")
-    if cancel is None:
-        cancel = Event()
-    with install_lock():
-        core, _ = detect()
-        if core:
-            return core
-        env = installer_environment()
-        if node_available(env) and not shutil.which("pi", path=env["PATH"]):
-            return official_install(env, progress, cancel)
-        return standalone_install(progress, cancel)
-
-
-def standalone_install(progress, cancel):
-    if shutil.disk_usage(DATA).free < 220 * 1024**2:
-        raise RuntimeError("请先腾出至少 220 MiB 磁盘空间")
-    if MANAGED.exists():
-        try:
-            return validate_pi(MANAGED / "pi")
-        except (OSError, RuntimeError, subprocess.TimeoutExpired):
-            # Preserve the previous files until the replacement passes validation.
-            pass
-    with TemporaryDirectory(prefix="install-", dir=DATA) as tmp:
-        folder = Path(tmp)
-        archive = folder / "pi.tar.gz"
-        digest = hashlib.sha256()
-        progress("正在下载 Pi…")
-        with urlopen(RELEASE, timeout=20) as response, archive.open("wb") as output:
-            if not response.geturl().startswith("https://"):
-                raise RuntimeError("Pi 下载需要 HTTPS")
-            size = 0
-            megabytes = 0
-            while chunk := response.read(256 * 1024):
-                if cancel.is_set():
-                    raise RuntimeError("已取消安装")
-                size += len(chunk)
-                if size > 75 * 1024**2:
-                    raise RuntimeError("Pi 下载文件过大")
-                digest.update(chunk)
-                output.write(chunk)
-                if size // 1024**2 > megabytes:
-                    megabytes = size // 1024**2
-                    progress(f"正在下载 Pi… {megabytes} MiB")
-        if digest.hexdigest() != SHA256:
-            raise RuntimeError("Pi 发布包校验失败")
-        progress("正在解压和验证 Pi…")
-        unpacked = folder / "payload"
-        unpacked.mkdir()
-        with tarfile.open(archive) as tar:
-            tar.extractall(unpacked, filter="data")
-        binaries = [path for path in unpacked.rglob("pi") if path.is_file()
-                    and os.access(path, os.X_OK)]
-        if not binaries:
-            raise RuntimeError("发布包中找不到 Pi")
-        binary = min(binaries, key=lambda path: len(path.parts))
-        if validate_pi(binary)[1] != VERSION:
-            raise RuntimeError("Pi 发布包版本与预期不一致")
-        if cancel.is_set():
-            raise RuntimeError("已取消安装")
-        backup = folder / "previous"
-        if MANAGED.exists():
-            MANAGED.rename(backup)
-        try:
-            binary.parent.rename(MANAGED)
-            return validate_pi(MANAGED / "pi")
-        except (OSError, RuntimeError, subprocess.TimeoutExpired):
-            if MANAGED.exists():
-                MANAGED.rename(folder / "failed")
-            if backup.exists():
-                backup.rename(MANAGED)
-            raise
+    # Download completely before executing. The script inherits the controlling PTY.
+    script = r"""
+set -e
+file=$(mktemp)
+trap 'rm -f -- "$file"' EXIT
+curl --fail --silent --show-error --location --proto '=https' \
+    --connect-timeout 20 --output "$file" "$1"
+/bin/sh "$file"
+"""
+    return ["/bin/sh", "-c", script, "card-pi-installer", INSTALLER], env
 
 
 def load_settings():

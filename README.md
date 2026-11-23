@@ -1,8 +1,6 @@
 # Card Pi
 
-![Card Pi 启动图标](packaging/card-pi.png)
-
-Card Pi 是面向 CardputerZero（ARM64）的第三方 Pi 客户端。它在设备本机直接调用原版 [Pi](https://pi.dev/)，并把对话、项目和会话操作适配到 320×170 屏幕与实体键盘。
+Card Pi 是面向 CardputerZero（ARM64）的第三方 Pi 客户端，由独立开发者制作，非 Pi 官方出品。它在设备本机直接调用原版 [Pi](https://pi.dev/)，并把对话、项目和会话操作适配到 320×170 屏幕与实体键盘。
 
 Card Pi 和终端 Pi 在同一设备账号下共用 Pi 的模型登录、配置、项目扩展和会话。配置方法沿用 [Pi 官方文档](https://docs.pi.dev/latest/configuration)。你可以继续在设备终端、ZeroDesk Shell 或 SSH 中直接运行 Pi，也可以用 Card Pi 打开同一项目下的已有会话。
 

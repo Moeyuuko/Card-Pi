@@ -25,7 +25,7 @@ Card Pi 和终端 Pi 在同一设备账号下共用 Pi 的模型登录、配置�
 将 ARM64 的 `.deb` 复制到 CardputerZero，在包所在目录执行以下命令。已有旧版可用同一条命令升级。
 
 ```sh
-sudo apt install ./card-pi_0.0.4_arm64.deb
+sudo apt install ./card-pi_0.0.5_arm64.deb
 ```
 
 未检测到 Pi 时，选择「安装 Pi」即可在 Card Pi 的内置终端运行 Pi 官方 Linux 安装器。设备没有兼容的 Node.js 或 npm 时，按官方安装器的提示选择安装方式。如果安装器询问是否立即启动 Pi，可输入 **n** 回到 Card Pi 的安装流程。安装器退出后按 **Esc** 重新检测。可从「设置 → Pi 设置 → Pi 核心信息」查看实际可执行文件路径。 [Pi 官方安装指南](https://docs.pi.dev/latest/quickstart#1-install-pi)
@@ -40,7 +40,7 @@ sudo apt install ./card-pi_0.0.4_arm64.deb
 4. 在对话中按 **Ctrl+Space** 切换中英文。输入 `nihao` 后按 **Space** 或 **1–5** 选字，再按 **OK** 发送。候选栏打开时，直接按 **Enter** 会把原始字母放进输入框，继续保留中文模式。候选栏打开时可用 **Fn+F/X** 或 **Fn+L/M** 翻页。
 5. 按 **Tab** 打开会话菜单。各级菜单可长按 **↑/↓** 或 **F/X** 连续移动，松键即停。全屏历史中按 **Esc** 返回对话，任意页面长按 **Esc** 返回 HOME。
 
-首页左侧显示 Pi 核心版本，右上角每 8 秒在 Card Pi 版本与本机日期、时间和电量之间切换。聊天底栏轮播操作提示、缓存读写、上下文用量、输入输出 Token 和费用。首页的「升级 Pi」会执行当前 Pi 的 `pi update` 并实时显示终端输出，运行结束后按 **Esc** 返回。通过官方安装器安装的 Pi 支持用此命令更新。通过其他包管理器安装的 Pi，按该包管理器的方式更新。 [Pi 更新命令](https://docs.pi.dev/latest/cli#update-pi-or-packages)
+首页左侧显示 Pi 核心版本，右上角每 8 秒在 Card Pi 版本与本机日期、时间和电量之间切换。聊天底栏左侧轮播当前模型、思考等级、缓存读写、上下文用量、输入输出 Token 和费用。右侧轮播快捷键，生成中显示 Esc 停止。首页的「升级 Pi」会执行当前 Pi 的 `pi update` 并实时显示终端输出，运行结束后按 **Esc** 返回。通过官方安装器安装的 Pi 支持用此命令更新。通过其他包管理器安装的 Pi，按该包管理器的方式更新。 [Pi 更新命令](https://docs.pi.dev/latest/cli#update-pi-or-packages)
 
 ## 设置
 

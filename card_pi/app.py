@@ -155,7 +155,7 @@ class Screen:
                 position += end
             yield paragraph[position:]
 
-    def ticker(self, image, box, pages, now, *, right=False, background=PANEL, period=TICKER_PERIOD):
+    def ticker(self, image, box, pages, now, *, right=False, background=PANEL, period=TICKER_PERIOD, color=DIM):
         x, y, width, height = box
         index, elapsed = divmod(now, period)
         index = int(index) % len(pages)
@@ -167,7 +167,7 @@ class Screen:
         for step in range(2 if offset and len(pages) > 1 else 1):
             label = self.clip(pages[(index + step) % len(pages)], width, self.small)
             draw.text((width - 1 if right else 0, height // 2 + step * height - offset),
-                      label, font=self.small, fill=DIM, anchor="rm" if right else "lm")
+                      label, font=self.small, fill=color, anchor="rm" if right else "lm")
         image.paste(strip, (x, y))
 
     def render(self, app):
@@ -351,13 +351,21 @@ class Screen:
         if preedit:
             self.candidates(draw, app, (preedit, candidates, highlight), y=142)
         else:
-            hint = app.ime_notice or app.notice or (app.tr("生成中  Esc 停止  Tab 菜单") if app.busy else
-                                                    app.tr("↑ 上次  Ctrl+空格 中英  Tab"))
-            history = app.tr("Fn+L 聊天记录")
-            draw.text((313, 155), history, font=self.small, fill=ACCENT, anchor="ra")
-            width = 299 - self.small.getlength(history)
-            pages = [hint] if app.ime_notice or app.busy else [hint, *app.usage_labels()]
-            self.ticker(image, (7, 155, int(width), 15), pages, app.ticker_time)
+            shortcuts = [app.tr(label) for label in (
+                "Fn+L 聊天记录", "Tab 菜单", "Ctrl+空格 中英", "↑↓ 回找输入", "/ 原生命令",
+            )]
+            stop = app.tr("Esc 停止")
+            right_width = ceil(max(self.small.getlength(label) for label in [stop, *shortcuts])) + 2
+            left_width = 300 - right_width
+            left_pages = [*app.model_labels(), *app.usage_labels()]
+            if app.notice or app.busy:
+                left_pages.insert(0, app.notice or app.tr("生成中…"))
+            if app.ime_notice:
+                left_pages = [app.ime_notice]
+            self.ticker(image, (7, 155, left_width, 15), left_pages, app.ticker_time)
+            self.ticker(image, (314 - right_width, 155, right_width, 15),
+                        [stop] if app.busy else shortcuts, app.ticker_time, right=True, color=ACCENT)
+
 
 
 class App:
@@ -374,6 +382,7 @@ class App:
         self.update_finished = False
         self.update_status = ""
         self.model = None
+        self.thinking_level = None
         self.cwd = self.session = self.session_file = None
         self.session_name = ""
         self.page = "check"
@@ -774,6 +783,7 @@ class App:
         self.clear_messages()
         self.stats = {}
         self.model = None
+        self.thinking_level = None
         self.tools.clear()
         self.stream.clear()
         self.pending.clear()
@@ -942,6 +952,12 @@ class App:
         label = "Battery" if self.settings.get("language") == "en" else "电量"
         return f"{label} {self.battery or '—'}"
 
+    def model_labels(self):
+        model = self.model or {}
+        name = model.get("id") or model.get("name") or "—"
+        level = self.thinking_level or "—"
+        return [self.tr("模型 {}").format(name), self.tr("思考等级 {}").format(level)]
+
     def usage_labels(self):
         en = self.settings.get("language") == "en"
         tokens = self.stats.get("tokens") or {}
@@ -951,7 +967,12 @@ class App:
         def count(value):
             if value is None:
                 return "—"
-            return f"{value / 1000:.3g}k" if value >= 1000 else str(value)
+            if value < 1000:
+                return str(value)
+            for scale, unit in ((1000, "K"), (1000000, "M"), (1000000000, "B")):
+                scaled = round(value / scale, 1)
+                if scaled < 1000 or unit == "B":
+                    return f"{scaled:.1f}".removesuffix(".0") + unit
 
         pages = []
         if tokens:
@@ -964,7 +985,10 @@ class App:
             label = "Context" if en else "上下文"
             used = count(context.get("tokens"))
             percent = context.get("percent")
-            suffix = "" if percent is None else f" {percent:.0f}%"
+            suffix = ""
+            if percent is not None:
+                amount = "<0.1" if 0 < percent < 0.1 else f"{percent:.1f}".removesuffix(".0")
+                suffix = f" {amount}%"
             pages.append(f"{label} {used}/{count(window)}{suffix}")
         return pages
 
@@ -983,6 +1007,7 @@ class App:
         data = event.get("data") or {}
         if command == "get_state":
             self.model = data.get("model")
+            self.thinking_level = data.get("thinkingLevel")
             self.session_file = data.get("sessionFile")
             self.session_name = data.get("sessionName") or self.tr("新会话")
             self.busy = bool(data.get("isStreaming") or data.get("isCompacting"))
@@ -1019,7 +1044,7 @@ class App:
         elif command == "set_model":
             self.model = data
             self.stats.pop("contextUsage", None)
-            self.send("get_session_stats")
+            self.send("get_state")
             self.page = "chat"
             self.notice = self.tr("已切换到 {}").format(f"{fields['provider']}/{fields['modelId']}")
         elif command == "prompt":
@@ -1072,6 +1097,8 @@ class App:
             self.page = "chat"
         elif kind == "stderr":
             self.notice = event["message"]
+        elif kind == "thinking_level_changed":
+            self.thinking_level = event.get("level")
         elif kind == "agent_start":
             self.busy = True
         elif kind == "agent_end" and not event.get("willRetry"):

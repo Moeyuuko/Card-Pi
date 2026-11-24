@@ -1,3 +1,3 @@
 """Card Pi application and Debian package version."""
 
-VERSION = "0.0.4"
+VERSION = "0.0.5"

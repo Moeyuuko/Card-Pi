@@ -154,7 +154,8 @@ class Pinyin:
     def configure(self, options):
         schema = options.schema
         default = f"patch:\n  schema_list:\n    - schema: {schema}\n  menu/page_size: {options.candidates}\n"
-        schema_patch = f"patch:\n  menu/page_size: {options.candidates}\n"
+        schema_patch = (f"patch:\n  menu/page_size: {options.candidates}\n"
+                        "  editor/bindings/Return: commit_raw_input\n")
         for key, value in (
             ("enable_completion", options.completion),
             ("enable_sentence", options.sentences),

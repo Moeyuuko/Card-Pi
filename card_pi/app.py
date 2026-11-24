@@ -174,9 +174,11 @@ class Screen:
         image = Image.new("RGB", (WIDTH, HEIGHT), BG)
         draw = ImageDraw.Draw(image)
         if app.page == "history":
+            if app.history_selected in app.tool_rows:
+                draw.text((8, 8), app.tr("OK 命令详情"), font=self.small, fill=ACCENT, anchor="lm")
             draw.text((313, 8), app.tr("Esc 返回"), font=self.small, fill=DIM, anchor="rm")
             self.transcript(draw, app.history_lines, y=16, row_height=app.chat_row_height(),
-                            visible=app.history_rows(), scroll=app.scroll)
+                            visible=app.history_rows(), scroll=app.scroll, selected=app.history_selected)
             return image
         if app.page == "native":
             self.terminal(draw, app.native, app.terminal_size(), app.tr("Pi 原生命令   Ctrl+Q 返回 Card Pi"))
@@ -285,14 +287,16 @@ class Screen:
                 label = app.tr("↑↓ 选择   OK 确认   长按 Esc 退出")
         self.footer(draw, label)
 
-    def transcript(self, draw, lines, y, row_height, visible, scroll=0):
+    def transcript(self, draw, lines, y, row_height, visible, scroll=0, selected=-1):
         start = max(0, len(lines) - visible - scroll)
         palette = {"heading": ACCENT, "strong": "#fff1b9", "em": "#d7bfff",
                    "link": "#8bb9f8", "code": "#eed18c", "code_block": "#8cddd9", "marker": DIM}
         for index, (role, line) in enumerate(lines[start:start + visible]):
             x, top = 8, y + row_height * index
             color = ACCENT if role == "user" else DIM if role == "tool" else TEXT
-            if any(style == "code_block" for _, style, _, _ in line):
+            if start + index == selected:
+                draw.rectangle((4, top, WIDTH - 5, top + row_height - 1), fill="#344955")
+            elif any(style == "code_block" for _, style, _, _ in line):
                 draw.rectangle((6, top, WIDTH - 7, top + row_height - 1), fill=PANEL)
             for text, style, font, width in line:
                 draw.text((x, top), text, font=font, fill=palette.get(style, color))
@@ -308,7 +312,7 @@ class Screen:
         composition = app.composition()
         if composition[0]:
             self.candidates(draw, app, composition, y=101)
-            hint = app.tr("空格/数字选字   Esc 清除拼音")
+            hint = app.tr("空格/数字选字   Enter 输入字母")
         else:
             hint = app.ime_notice or app.tr("OK 确认   Esc 取消   Ctrl+空格 中英")
         self.footer(draw, hint)
@@ -400,6 +404,10 @@ class App:
         self.wrapped_layout = None
         self.wrapped_stream = None
         self.tools = deque(maxlen=12)
+        self.tool_calls = {}
+        self.tool_messages = {}
+        self.tool_rows = {}
+        self.history_selected = -1
         self.stream = {}
         self.pending = {}
         self.drafts = {}
@@ -725,7 +733,8 @@ class App:
         self.page = "detail"
 
     def detail_lines(self, screen):
-        return list(screen.lines(self.detail_text[-8000:]))
+        text = self.detail_text if self.detail_back == "history" else self.detail_text[-8000:]
+        return list(screen.lines(text))
 
     def edit(self, page, text="", notice=""):
         if self.ime:
@@ -989,6 +998,12 @@ class App:
             self.clear_messages()
             for message in data.get("messages", []):
                 self.append_message(message)
+                if message.get("role") == "assistant":
+                    for block in message.get("content") or []:
+                        if isinstance(block, dict) and block.get("type") == "toolCall":
+                            self.add_tool(block.get("id"), block.get("name"), block.get("arguments"), historical=True)
+                elif message.get("role") == "toolResult":
+                    self.finish_tool(message.get("toolCallId"), message, message.get("isError", False))
         elif command == "get_available_models" and self.page == "models":
             current = self.model or {}
             models = sorted(data.get("models", []), key=lambda model: (model["provider"], model["id"]))
@@ -1028,6 +1043,24 @@ class App:
         if message.get("errorMessage"):
             self.notice = str(message["errorMessage"])
 
+    def add_tool(self, ident, name, args, *, historical=False):
+        command = args.get("command") if isinstance(args, dict) else None
+        command = command if name == "bash" and isinstance(command, str) else ""
+        summary = " ".join(command.split())
+        self.messages.append(("tool", f"$ {summary}" if summary else f"> {name or 'tool'}"))
+        if ident:
+            self.tool_messages[len(self.messages) - 1] = ident
+            self.tool_calls[ident] = {
+                "command": command or name or "tool",
+                "status": "状态未知" if historical else "执行中",
+                "output": "",
+            }
+
+    def finish_tool(self, ident, result, failed):
+        if ident in self.tool_calls:
+            self.tool_calls[ident].update(status="执行失败" if failed else "已完成",
+                                         output=message_text(result)[-30000:])
+
     def event(self, event):
         kind = event.get("type")
         if kind == "response":
@@ -1059,9 +1092,13 @@ class App:
             self.stream.clear()
             self.append_message(event.get("message", {}))
         elif kind == "tool_execution_start":
-            name = event.get("toolName", "")
-            self.messages.append(("tool", f"· {name}"))
+            self.add_tool(event.get("toolCallId"), event.get("toolName"), event.get("args"))
+        elif kind == "tool_execution_update":
+            call = self.tool_calls.get(event.get("toolCallId"))
+            if call:
+                call["output"] = message_text(event.get("partialResult", {}))[-30000:]
         elif kind == "tool_execution_end":
+            self.finish_tool(event.get("toolCallId"), event.get("result", {}), event.get("isError", False))
             self.tools.append((event.get("toolName", ""), message_text(event.get("result", {}))[-3000:]))
         elif kind == "extension_ui_request":
             if event.get("method") == "notify":
@@ -1104,6 +1141,9 @@ class App:
 
     def clear_messages(self):
         self.messages.clear()
+        self.tool_calls.clear()
+        self.tool_messages.clear()
+        self.tool_rows.clear()
         self.input_history.clear()
         self.recalled_inputs = ()
         self.wrapped_messages.clear()
@@ -1115,11 +1155,20 @@ class App:
         layout = self.display_value("chat_font_size"), self.display_value("render_markdown")
         if self.wrapped_layout != layout:
             self.wrapped_layout = layout
+            self.tool_rows.clear()
             self.wrapped_messages.clear()
             self.wrapped_count = 0
         for index in range(self.wrapped_count, len(self.messages)):
             role, value = self.messages[index]
-            self.wrapped_messages.extend(screen.message_lines(role, value, *layout))
+            if role == "tool":
+                font = screen.chat_fonts[layout[0]][0]
+                if index in self.tool_messages:
+                    self.tool_rows[len(self.wrapped_messages)] = self.tool_messages[index]
+                    value = "[+] " + value
+                summary = screen.clip(value, WIDTH - 16, font)
+                self.wrapped_messages.append((role, [(summary, "body", font, font.getlength(summary))]))
+            else:
+                self.wrapped_messages.extend(screen.message_lines(role, value, *layout))
         self.wrapped_count = len(self.messages)
         if not self.stream:
             self.wrapped_stream = None
@@ -1132,22 +1181,32 @@ class App:
 
     def enter_history(self):
         self.history_lines = tuple(self.chat_lines(self.screen))
+        self.history_selected = len(self.history_lines) - 1
         self.scroll = 0
         self.page = "history"
 
     def scroll_history(self, key):
-        if key.code in (ESC, ENTER, TAB):
+        if key.code in (ESC, TAB):
             self.scroll = 0
             self.history_lines = ()
             self.page = "chat"
-            return
-        if not key.control and key.code in LIST_STEPS:
+        elif key.code == ENTER and not key.repeat and not key.control:
+            call = self.tool_calls.get(self.tool_rows.get(self.history_selected))
+            if call:
+                status = self.tr(call["status"])
+                self.detail(f"{call['command']}\n\n{status}\n{call['output']}", "history")
+        elif not key.control and key.code in LIST_STEPS and self.history_lines:
             rows = self.history_rows()
-            step = {UP: 1, DOWN: -1, KEY_F: 1, KEY_X: -1, PAGE_UP: rows, PAGE_DOWN: -rows}[key.code]
-            self.scroll = max(0, min(max(0, len(self.history_lines) - rows), self.scroll + step))
-            if step < 0 and not self.scroll:
-                self.history_lines = ()
-                self.page = "chat"
+            step = LIST_STEPS[key.code]
+            if key.code in (PAGE_UP, PAGE_DOWN):
+                step = -rows if key.code == PAGE_UP else rows
+            last = len(self.history_lines) - 1
+            self.history_selected = max(0, min(last, self.history_selected + step))
+            bottom = last - self.scroll
+            if self.history_selected < bottom - rows + 1:
+                self.scroll = last - self.history_selected - rows + 1
+            elif self.history_selected > bottom:
+                self.scroll = last - self.history_selected
 
     def repeat_scroll(self, key):
         if key.alt or key.control:
@@ -1255,7 +1314,7 @@ class App:
             return bool(self.composition()[0])
         code = None
         if preedit:
-            code = {ESC: 0xff1b, BACKSPACE: 0xff08, ENTER: ord(" "),
+            code = {ESC: 0xff1b, BACKSPACE: 0xff08, ENTER: 0xff0d,
                     PAGE_UP: 0xff55, PAGE_DOWN: 0xff56, UP: 0xff55, DOWN: 0xff56,
                     LEFT: 0xff51, RIGHT: 0xff53}.get(key.code)
         if code is None and len(key.text) == 1 and ((key.text.isascii() and key.text.islower()) or preedit):

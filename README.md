@@ -51,13 +51,7 @@ sudo apt install ./card-pi_0.0.5_arm64.deb
 
 ## 许可证
 
-Card Pi 自有代码使用 [MIT 许可证](LICENSE)。安装包包含 Card Pi 的程序和图标，通过 Debian 依赖安装 Rime、字体及终端解析等组件。Pi 核心由设备从官方渠道安装。各组件按自身的许可证分发。
-
-- **markdown-it-py** 使用 MIT，由 Debian 的 `python3-markdown-it` 提供。 [上游许可证](https://github.com/executablebooks/markdown-it-py/blob/master/LICENSE)
-- **Pi** 源码采用 MIT，由设备上的官方安装器单独安装。 [Pi 源码许可证](https://github.com/earendil-works/pi/blob/v1.6.0/LICENSE)
-- **Rime** 上游引擎采用 BSD-3-Clause。Debian Trixie 的 `librime1t64` 版权文件列有 GPL-3 及其他条目，重新分发这个构建时应按 Debian 包记录核对。简体袖珍拼音使用 Apache-2.0，自然码双拼使用 GPL-3，朙月拼音、基础配置、八股文和笔画方案使用 LGPL-3。 [Rime 引擎](https://github.com/rime/librime) · [Debian librime](https://packages.debian.org/trixie/librime1t64) · [Rime 方案许可说明](https://github.com/rime/plum#license)
-- **其他运行依赖**。pyte 使用 LGPL-3，wcwidth 使用 MIT（Debian 包另有 Unicode 数据条款），OpenCC 使用 Apache-2.0，Pillow 使用 HPND，Python 使用 PSF-2.0，curl 使用 curl 许可证。Debian `ca-certificates` 的打包代码为 GPL-2.0-or-later，Mozilla 证书数据为 MPL-2.0。Noto Sans CJK 使用 OFL-1.1，DejaVu Sans Mono 使用 Bitstream Vera 条款。 [pyte 版权](https://metadata.ftp-master.debian.org/changelogs/main/p/pyte/pyte_0.8.0-3_copyright) · [Pillow 许可证](https://github.com/python-pillow/Pillow/blob/11.1.0/LICENSE) · [Python 许可证](https://docs.python.org/3.13/license.html) · [curl 许可证](https://curl.se/docs/copyright.html)
-- **图标**使用 Card Pi 自制的黑底白字终端图标。 [图标说明](packaging/ICON_NOTICE)
+Card Pi 自有代码采用 [MIT 许可证](LICENSE)。第三方组件适用各自的许可证。
 
 ## 致谢
 

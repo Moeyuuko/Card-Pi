@@ -29,6 +29,7 @@ from .version import VERSION
 TICKER_PERIOD = 4
 HEADER_TICKER_PERIOD = 8
 TICKER_SLIDE = 0.35
+TYPEWRITER_RATES = {"off": 0, "slow": 36, "medium": 72, "fast": 144}
 
 PAGE_UP, PAGE_DOWN = 104, 109
 BG, PANEL, TEXT, DIM, ACCENT = "#10151c", "#1c2936", "#edf2f7", "#a3b4c5", "#85e6b9"
@@ -38,7 +39,8 @@ LIST_STEPS = {UP: -1, DOWN: 1, KEY_F: -1, KEY_X: 1, PAGE_UP: -6, PAGE_DOWN: 6}
 LIST_PAGES = {
     "home", "workspace", "browse", "sessions", "trash", "delete_session", "purge_session", "chat_menu",
     "models", "settings", "pi_settings", "language", "display_settings", "display_choice", "input_settings",
-    "input_choice", "dialog_select", "dialog_confirm",
+    "input_choice", "dialog_select", "dialog_confirm", "slash_menu", "skills", "templates", "thinking",
+    "slash_sessions", "resume_session", "confirm_compact",
 }
 TEXT_FIELDS = {"path", "binary", "rename", "dialog_input", "dialog_editor"}
 PATH_FIELDS = {"path", "binary"}
@@ -48,6 +50,9 @@ DEFAULT_TERMINAL_SIZE = 9
 CTRL_Q = 16
 ON_OFF = ((True, "开启"), (False, "关闭"))
 DISPLAY_SETTINGS = {
+    "font_edges": ("字体边缘", "pixel", (("pixel", "像素"), ("smooth", "平滑"))),
+    "typewriter": ("打字机效果", "medium",
+                   (("off", "关闭"), ("slow", "慢速"), ("medium", "中速"), ("fast", "快速"))),
     "render_markdown": ("Markdown 渲染", True, ON_OFF),
     "chat_font_size": ("聊天字号", 13, tuple((size, f"{size} px") for size in (11, 13, 15))),
     "chat_line_spacing": ("聊天行距", "compact", (("compact", "紧凑"), ("relaxed", "宽松"))),
@@ -155,7 +160,7 @@ class Screen:
                 position += end
             yield paragraph[position:]
 
-    def ticker(self, image, box, pages, now, *, right=False, background=PANEL, period=TICKER_PERIOD, color=DIM):
+    def ticker(self, image, box, pages, now, *, fontmode, right=False, background=PANEL, period=TICKER_PERIOD, color=DIM):
         x, y, width, height = box
         index, elapsed = divmod(now, period)
         index = int(index) % len(pages)
@@ -164,6 +169,7 @@ class Screen:
             offset = 0
         strip = Image.new("RGB", (width, height), background)
         draw = ImageDraw.Draw(strip)
+        draw.fontmode = fontmode
         for step in range(2 if offset and len(pages) > 1 else 1):
             label = self.clip(pages[(index + step) % len(pages)], width, self.small)
             draw.text((width - 1 if right else 0, height // 2 + step * height - offset),
@@ -173,6 +179,7 @@ class Screen:
     def render(self, app):
         image = Image.new("RGB", (WIDTH, HEIGHT), BG)
         draw = ImageDraw.Draw(image)
+        draw.fontmode = "1" if app.display_value("font_edges") == "pixel" else "L"
         if app.page == "history":
             if app.history_selected in app.tool_rows:
                 draw.text((8, 8), app.tr("OK 命令详情"), font=self.small, fill=ACCENT, anchor="lm")
@@ -192,7 +199,8 @@ class Screen:
         clock = datetime.now().strftime("%m-%d %H:%M")
         header = [version, f"{clock}  {app.battery_label()}"]
         width = ceil(max(self.small.getlength(label) for label in header)) + 2
-        self.ticker(image, (314 - width, 0, width, 24), header, now, right=True, period=HEADER_TICKER_PERIOD)
+        self.ticker(image, (314 - width, 0, width, 24), header, now,
+                    fontmode=draw.fontmode, right=True, period=HEADER_TICKER_PERIOD)
         title = self.clip(app.title(), 296 - width)
         draw.text((7, 12), title, fill=ACCENT, font=self.font, anchor="lm")
         if app.page == "chat":
@@ -352,9 +360,9 @@ class Screen:
             self.candidates(draw, app, (preedit, candidates, highlight), y=142)
         else:
             shortcuts = [app.tr(label) for label in (
-                "Fn+L 聊天记录", "Tab 菜单", "Ctrl+空格 中英", "↑↓ 回找输入", "/ 原生命令",
+                "Fn+L 聊天记录", "Tab 菜单", "Ctrl+空格 中英", "↑↓ 回找输入", "/ Pi 命令",
             )]
-            stop = app.tr("Esc 停止")
+            stop = app.tr("Esc 停止" if app.busy else "Esc 显示全文")
             right_width = ceil(max(self.small.getlength(label) for label in [stop, *shortcuts])) + 2
             left_width = 300 - right_width
             left_pages = [*app.model_labels(), *app.usage_labels()]
@@ -362,9 +370,10 @@ class Screen:
                 left_pages.insert(0, app.notice or app.tr("生成中…"))
             if app.ime_notice:
                 left_pages = [app.ime_notice]
-            self.ticker(image, (7, 155, left_width, 15), left_pages, app.ticker_time)
+            self.ticker(image, (7, 155, left_width, 15), left_pages, app.ticker_time, fontmode=draw.fontmode)
             self.ticker(image, (314 - right_width, 155, right_width, 15),
-                        [stop] if app.busy else shortcuts, app.ticker_time, right=True, color=ACCENT)
+                        [stop] if app.busy or app.typing_queue else shortcuts, app.ticker_time,
+                        fontmode=draw.fontmode, right=True, color=ACCENT)
 
 
 
@@ -383,6 +392,7 @@ class App:
         self.update_status = ""
         self.model = None
         self.thinking_level = None
+        self.prompt_templates = []
         self.cwd = self.session = self.session_file = None
         self.session_name = ""
         self.page = "check"
@@ -418,6 +428,11 @@ class App:
         self.tool_rows = {}
         self.history_selected = -1
         self.stream = {}
+        self.typing_queue = deque()
+        self.typing_count = 0
+        self.stream_count = 0
+        self.typing_credit = 0.0
+        self.typing_time = monotonic()
         self.pending = {}
         self.drafts = {}
         self.dialogs = deque()
@@ -516,7 +531,7 @@ class App:
                 changed = True
                 if not self.rpc:
                     break
-        return changed
+        return self.advance_typewriter() or changed
 
     def store(self):
         try:
@@ -751,6 +766,8 @@ class App:
         if not self.ime_pending:
             self.ime_notice = ""
         self.page, self.field, self.notice = page, text, notice
+        if page == "rename":
+            self.rename_back = "chat_menu"
         self.field_cursor = len(text)
         if self.chinese:
             self.enable_pinyin()
@@ -763,6 +780,10 @@ class App:
             "path": self.tr("输入工作目录"), "binary": self.tr("输入 Pi 可执行文件路径"),
             "sessions": self.tr("会话  /  {}").format(self.cwd.name if self.cwd else ""),
             "chat": f"{'●' if self.busy else '○'}  {self.cwd.name if self.cwd else ''}  /  {self.session_name}",
+            "skills": self.tr("选择技能"), "slash_menu": self.tr("Pi 命令"),
+            "templates": self.tr("提示词模板"), "thinking": self.tr("思考强度"),
+            "slash_sessions": self.tr("会话操作"), "resume_session": self.tr("恢复会话"),
+            "confirm_compact": self.tr("压缩当前上下文？"),
             "models": self.tr("切换模型"), "settings": self.tr("设置"), "language": self.tr("界面语言"),
             "input_settings": self.tr("输入法设置 · Rime 中州韵"),
             "pi_settings": self.tr("Pi 设置"),
@@ -784,6 +805,7 @@ class App:
         self.stats = {}
         self.model = None
         self.thinking_level = None
+        self.prompt_templates = []
         self.tools.clear()
         self.stream.clear()
         self.pending.clear()
@@ -924,6 +946,9 @@ class App:
         self.pending[ident] = (command, fields)
 
     def prompt(self):
+        if self.draft.strip() == "/skill":
+            self.show_skills("chat")
+            return
         if self.busy or not self.draft.strip():
             return
         if not self.rpc:
@@ -934,6 +959,88 @@ class App:
         self.scroll = 0
         self.recalled_inputs = ()
         self.send("prompt", message=self.draft)
+
+    def slash_menu(self, *, refresh=True):
+        rows = [
+            (self.tr("/skill 选择技能"), "skills"),
+            (self.tr("/model 切换模型"), "models"),
+            (self.tr("/thinking 思考等级"), "thinking"),
+            (self.tr("会话操作"), "sessions"),
+        ]
+        if self.prompt_templates:
+            rows.append((self.tr("提示词模板"), "templates"))
+        rows.append((self.tr("Pi 原生命令 / 登录"), "native"))
+        selected = self.rows[self.selected][1] if self.page == "slash_menu" and self.rows else None
+        self.list_page("slash_menu", rows)
+        self.selected = next((index for index, (_, action) in enumerate(rows) if action == selected), 0)
+        if refresh and not any(command == "get_commands" for command, _ in self.pending.values()):
+            self.send("get_commands")
+
+    def thinking_menu(self):
+        if not self.rpc or self.busy:
+            self.notice = self.tr("请在 Pi 空闲时修改思考等级")
+            return
+        self.list_page("thinking", [])
+        self.notice = self.tr("正在读取思考等级…")
+        self.send("get_available_thinking_levels")
+
+    def slash_sessions(self):
+        self.list_page("slash_sessions", [
+            (self.tr("/new 新建会话"), "new"),
+            (self.tr("/resume 恢复会话"), "resume"),
+            (self.tr("/name 重命名会话"), "rename"),
+            (self.tr("/session 会话信息"), "info"),
+            (self.tr("/compact 压缩上下文"), "compact"),
+        ])
+
+    def open_slash_session(self, action):
+        if action == "info":
+            self.show_session_info()
+            if self.rpc:
+                self.send("get_session_stats")
+            return
+        if not self.rpc or self.busy:
+            self.notice = self.tr("请在 Pi 空闲时操作会话")
+            return
+        if action == "new":
+            self.start(None, chinese=self.chinese)
+        elif action == "resume":
+            extras = self.settings.get("session_files", {})
+            paths = session_list(self.cwd, extras.get(str(self.cwd)))
+            self.list_page("resume_session", [(title, path) for _, title, path in paths])
+            if not self.rows:
+                self.notice = self.tr("没有可恢复的会话")
+        elif action == "rename":
+            self.edit("rename", self.session_name if self.session_file else "", self.tr("输入新的会话名称"))
+            self.rename_back = "slash_sessions"
+        elif action == "compact":
+            self.list_page("confirm_compact", [
+                (self.tr("取消"), False), (self.tr("确认压缩"), True),
+            ])
+
+    def show_session_info(self):
+        model, level = self.model_labels()
+        lines = [self.session_name, str(self.cwd), model, level, *self.usage_labels()]
+        if self.session_file:
+            lines.append(self.session_file)
+        self.detail("\n".join(lines), "slash_sessions")
+
+    def show_skills(self, back):
+        self.skills_back = back
+        self.list_page("skills", [])
+        if self.rpc:
+            self.notice = self.tr("正在读取技能…")
+            self.send("get_commands")
+        else:
+            self.notice = self.tr("Pi 已退出，请从会话列表重新打开")
+
+    def insert_command(self, command):
+        draft = "" if self.draft.strip() == "/skill" else self.draft
+        self.draft = f"/{command} {draft}"
+        self.cursor = len(self.draft)
+        self.recalled_inputs = ()
+        self.notice = ""
+        self.page = "chat"
 
     def battery_label(self):
         now = monotonic()
@@ -996,12 +1103,16 @@ class App:
         command, fields = self.pending.pop(event.get("id"), ("", {}))
         if command == "get_session_stats":
             self.stats = (event.get("data") or {}) if event.get("success") else {}
+            if self.page == "detail" and self.detail_back == "slash_sessions":
+                offset = self.offset
+                self.show_session_info()
+                self.offset = min(offset, max(0, len(self.detail_lines(self.screen)) - 7))
             return
         if not event.get("success"):
             self.notice = str(event.get("error") or self.tr("Pi 命令失败"))
             if command == "set_model":
                 self.page = "chat"
-            if command in {"prompt", "abort", "get_state", "get_messages"}:
+            if command in {"prompt", "abort", "get_state", "get_messages", "compact"}:
                 self.busy = False
             return
         data = event.get("data") or {}
@@ -1029,6 +1140,36 @@ class App:
                             self.add_tool(block.get("id"), block.get("name"), block.get("arguments"), historical=True)
                 elif message.get("role") == "toolResult":
                     self.finish_tool(message.get("toolCallId"), message, message.get("isError", False))
+        elif command == "get_commands":
+            commands = data.get("commands", [])
+            self.prompt_templates = sorted(
+                {item["name"] for item in commands if item.get("source") == "prompt" and item.get("name")},
+                key=str.casefold,
+            )
+            if self.page == "slash_menu":
+                self.slash_menu(refresh=False)
+            elif self.page == "skills":
+                names = {item["name"] for item in commands
+                         if item.get("source") == "skill" and str(item.get("name", "")).startswith("skill:")}
+                self.rows = [(name.removeprefix("skill:"), name) for name in sorted(names, key=str.casefold)]
+                self.selected = 0
+                self.notice = "" if self.rows else self.tr("当前会话没有可用技能")
+        elif command == "get_available_thinking_levels" and self.page == "thinking":
+            levels = data.get("levels", [])
+            self.rows = [(f"{'* ' if level == self.thinking_level else ''}{self.tr(level)}", level)
+                         for level in levels]
+            self.selected = levels.index(self.thinking_level) if self.thinking_level in levels else 0
+            self.notice = "" if self.rows else self.tr("没有可用的思考等级")
+        elif command == "set_thinking_level":
+            self.thinking_level = fields["level"]
+            self.send("get_state")
+            if self.page == "thinking":
+                self.page = "chat"
+                self.notice = self.tr("思考等级 {}").format(self.tr(self.thinking_level))
+        elif command == "compact":
+            self.busy = False
+            self.notice = self.tr("上下文已压缩")
+            self.send("get_session_stats")
         elif command == "get_available_models" and self.page == "models":
             current = self.model or {}
             models = sorted(data.get("models", []), key=lambda model: (model["provider"], model["id"]))
@@ -1110,14 +1251,26 @@ class App:
             self.send("get_state")
         elif kind == "message_start" and event.get("message", {}).get("role") == "assistant":
             self.stream.clear()
+            self.stream_count = 0
         elif kind == "message_update":
             update = event.get("assistantMessageEvent", {})
             if update.get("type") == "text_delta":
                 index = update.get("contentIndex", 0)
-                self.stream[index] = (self.stream.get(index, "") + update.get("delta", ""))[-6000:]
+                self.stream[index] = self.stream.get(index, "") + update.get("delta", "")
         elif kind == "message_end":
-            self.stream.clear()
-            self.append_message(event.get("message", {}))
+            message = event.get("message", {})
+            if message.get("role") == "assistant":
+                value = message_text(message)
+                shown = self.stream_text()[:self.stream_count]
+                if self.display_value("typewriter") != "off" and value:
+                    revealed = len(shown) if value.startswith(shown) else 0
+                    if revealed < len(value):
+                        if not self.typing_queue:
+                            self.typing_count = revealed
+                        self.typing_queue.append(len(self.messages))
+                self.stream.clear()
+                self.stream_count = 0
+            self.append_message(message)
         elif kind == "tool_execution_start":
             self.add_tool(event.get("toolCallId"), event.get("toolName"), event.get("args"))
         elif kind == "tool_execution_update":
@@ -1168,6 +1321,9 @@ class App:
 
     def clear_messages(self):
         self.messages.clear()
+        self.stream.clear()
+        self.typing_queue.clear()
+        self.typing_count = self.stream_count = 0
         self.tool_calls.clear()
         self.tool_messages.clear()
         self.tool_rows.clear()
@@ -1178,6 +1334,45 @@ class App:
         self.wrapped_stream = None
         self.history_lines = ()
 
+    def stream_text(self):
+        return "".join(value for _, value in sorted(self.stream.items()))
+
+    def advance_typewriter(self):
+        now = monotonic()
+        elapsed = min(now - self.typing_time, 0.1)
+        self.typing_time = now
+        rate = TYPEWRITER_RATES[self.display_value("typewriter")]
+        if not rate:
+            return self.skip_typewriter()
+        if not self.typing_queue and not self.stream:
+            self.typing_credit = 0.0
+            return False
+        budget, self.typing_credit = divmod(self.typing_credit + rate * elapsed, 1)
+        budget = int(budget)
+        changed = False
+        while budget and self.typing_queue:
+            remaining = len(self.messages[self.typing_queue[0]][1]) - self.typing_count
+            used = min(budget, remaining)
+            self.typing_count += used
+            budget -= used
+            changed = changed or bool(used)
+            if self.typing_count == len(self.messages[self.typing_queue[0]][1]):
+                self.typing_queue.popleft()
+                self.typing_count = 0
+        if budget and self.stream and not self.typing_queue:
+            visible = min(self.stream_count + budget, sum(map(len, self.stream.values())))
+            changed = changed or visible != self.stream_count
+            self.stream_count = visible
+        return changed
+
+    def skip_typewriter(self):
+        visible = sum(map(len, self.stream.values()))
+        changed = bool(self.typing_queue) or visible != self.stream_count
+        self.typing_queue.clear()
+        self.typing_count = 0
+        self.stream_count = visible
+        return changed
+
     def chat_lines(self, screen):
         layout = self.display_value("chat_font_size"), self.display_value("render_markdown")
         if self.wrapped_layout != layout:
@@ -1185,7 +1380,8 @@ class App:
             self.tool_rows.clear()
             self.wrapped_messages.clear()
             self.wrapped_count = 0
-        for index in range(self.wrapped_count, len(self.messages)):
+        limit = self.typing_queue[0] if self.typing_queue else len(self.messages)
+        for index in range(self.wrapped_count, limit):
             role, value = self.messages[index]
             if role == "tool":
                 font = screen.chat_fonts[layout[0]][0]
@@ -1196,11 +1392,16 @@ class App:
                 self.wrapped_messages.append((role, [(summary, "body", font, font.getlength(summary))]))
             else:
                 self.wrapped_messages.extend(screen.message_lines(role, value, *layout))
-        self.wrapped_count = len(self.messages)
-        if not self.stream:
+        self.wrapped_count = limit
+        if self.typing_queue:
+            active = self.messages[limit][1][:self.typing_count]
+        else:
+            active = self.stream_text()
+            if self.display_value("typewriter") != "off":
+                active = active[:self.stream_count]
+        if not active:
             self.wrapped_stream = None
             return self.wrapped_messages
-        active = "".join(value for _, value in sorted(self.stream.items()))
         key = layout, active
         if self.wrapped_stream is None or self.wrapped_stream[0] != key:
             self.wrapped_stream = key, list(screen.message_lines("assistant", active, *layout))
@@ -1315,6 +1516,7 @@ class App:
             (self.tr("翻看聊天记录"), "history"), (self.tr("切换模型"), "models"),
             (self.tr("Pi 设置"), "pi_settings"), (self.tr("输入法设置"), "input"),
             (self.tr("显示设置"), "display"),
+            (self.tr("选择技能"), "skills"),
             (self.tr("Pi 原生命令 / 登录"), "native"),
             (self.tr("会话列表"), "sessions"), (self.tr("重命名会话"), "rename"),
             (self.tr("查看最近工具输出"), "tools"),
@@ -1356,7 +1558,7 @@ class App:
         preedit, _, _ = self.composition()
         if (key.text == "/" and not self.draft and not preedit and not key.repeat
                 and not (self.chinese and self.ime_pending)):
-            self.start_native(from_chat=True)
+            self.slash_menu()
             return
         if self.handle_ime(key, self.insert, preedit):
             return
@@ -1364,6 +1566,8 @@ class App:
             self.prompt()
         elif key.code == ESC and not key.repeat and self.busy:
             self.send("abort")
+        elif key.code == ESC and not key.repeat:
+            self.skip_typewriter()
         elif key.code == TAB and not key.repeat:
             self.chat_menu()
         elif key.code == BACKSPACE and self.cursor:
@@ -1433,6 +1637,8 @@ class App:
                     self.preferences()
                 elif self.detail_back == "pi_settings":
                     self.pi_settings(self.pi_settings_from_chat, focus="core")
+                elif self.detail_back == "slash_sessions":
+                    self.slash_sessions()
                 elif self.detail_back == "home":
                     self.home()
                 else:
@@ -1455,6 +1661,8 @@ class App:
                 self.answer(cancelled=True)
             elif page == "path":
                 self.workspace()
+            elif page == "rename" and self.rename_back == "slash_sessions":
+                self.slash_sessions()
             else:
                 self.page = "install" if page == "binary" else "chat_menu"
         elif key.code == BACKSPACE and self.field_cursor:
@@ -1497,9 +1705,25 @@ class App:
                 self.page = "chat"
                 if self.chinese:
                     self.enable_pinyin()
+            elif page == "skills":
+                if self.skills_back == "slash_menu":
+                    self.slash_menu()
+                elif self.skills_back == "chat_menu":
+                    self.chat_menu()
+                else:
+                    self.page = "chat"
+                    self.notice = ""
+            elif page == "slash_menu":
+                self.page = "chat"
+            elif page in {"templates", "thinking", "slash_sessions"}:
+                self.slash_menu()
+            elif page in {"resume_session", "confirm_compact"}:
+                self.slash_sessions()
             elif page == "models":
                 if self.models_back == "pi_settings":
                     self.pi_settings(True, focus="/model")
+                elif self.models_back == "slash_menu":
+                    self.slash_menu()
                 else:
                     self.chat_menu()
             elif page == "pi_settings":
@@ -1595,6 +1819,38 @@ class App:
             self.store()
         elif page == "chat_menu":
             self.open_chat_menu(entry)
+        elif page == "slash_menu":
+            if entry == "skills":
+                self.show_skills("slash_menu")
+            elif entry == "models":
+                self.models(back="slash_menu")
+            elif entry == "thinking":
+                self.thinking_menu()
+            elif entry == "sessions":
+                self.slash_sessions()
+            elif entry == "templates":
+                self.list_page("templates", [(f"/{name}", name) for name in self.prompt_templates])
+            else:
+                self.start_native(from_chat=True)
+        elif page in {"skills", "templates"}:
+            self.insert_command(entry)
+        elif page == "thinking" and not any(command == "set_thinking_level" for command, _ in self.pending.values()):
+            self.send("set_thinking_level", level=entry)
+        elif page == "slash_sessions":
+            self.open_slash_session(entry)
+        elif page == "resume_session":
+            if self.session_file and entry == Path(self.session_file):
+                self.page = "chat"
+            else:
+                self.start(entry, chinese=self.chinese)
+        elif page == "confirm_compact":
+            if entry and self.rpc and not self.busy:
+                self.page = "chat"
+                self.busy = True
+                self.notice = self.tr("正在压缩上下文…")
+                self.send("compact")
+            else:
+                self.slash_sessions()
         elif page == "models" and not any(command == "set_model" for command, _ in self.pending.values()):
             self.send("set_model", provider=entry["provider"], modelId=entry["id"])
 
@@ -1639,6 +1895,8 @@ class App:
             self.enter_history()
         elif action == "models":
             self.models()
+        elif action == "skills":
+            self.show_skills("chat_menu")
         elif action == "pi_settings":
             self.pi_settings(True)
         elif action == "input":

@@ -40,7 +40,46 @@ EN = {
     "Tab 菜单": "Tab Menu",
     "Ctrl+空格 中英": "Ctrl+Space IME",
     "↑↓ 回找输入": "↑↓ Recall",
-    "/ 原生命令": "/ Pi Commands",
+    "/ Pi 命令": "/ Pi Commands",
+    "Pi 命令": "Pi Commands",
+    "/skill 选择技能": "/skill Select Skill",
+    "/model 切换模型": "/model Switch Model",
+    "/thinking 思考等级": "/thinking Thinking Level",
+    "会话操作": "Session Actions",
+    "提示词模板": "Prompt Templates",
+    "/new 新建会话": "/new New Session",
+    "/resume 恢复会话": "/resume Resume Session",
+    "/name 重命名会话": "/name Rename Session",
+    "/session 会话信息": "/session Session Info",
+    "/compact 压缩上下文": "/compact Compact Context",
+    "请在 Pi 空闲时操作会话": "Wait for Pi to finish first",
+    "请在 Pi 空闲时修改思考等级": "Wait for Pi to finish before changing thinking",
+    "正在读取思考等级…": "Loading thinking levels…",
+    "没有可用的思考等级": "No thinking levels available",
+    "没有可恢复的会话": "No sessions to resume",
+    "压缩当前上下文？": "Compact current context?",
+    "确认压缩": "Confirm compaction",
+    "正在压缩上下文…": "Compacting context…",
+    "上下文已压缩": "Context compacted",
+    "恢复会话": "Resume Session",
+    "off": "Off",
+    "minimal": "Minimal",
+    "low": "Low",
+    "medium": "Medium",
+    "high": "High",
+    "xhigh": "Extra High",
+    "max": "Maximum",
+    "选择技能": "Select Skill",
+    "正在读取技能…": "Loading skills…",
+    "当前会话没有可用技能": "No skills available in this session",
+    "字体边缘": "Font Edges",
+    "像素": "Pixel",
+    "平滑": "Smooth",
+    "打字机效果": "Typewriter Effect",
+    "慢速": "Slow",
+    "中速": "Medium",
+    "快速": "Fast",
+    "Esc 显示全文": "Esc Show All",
     "Esc 停止": "Esc Stop",
     "生成中…": "Generating…",
     "模型 {}": "Model {}",
@@ -149,7 +188,13 @@ EN = {
 }
 
 
+THINKING_ZH = {
+    "off": "关闭", "minimal": "极低", "low": "低", "medium": "中",
+    "high": "高", "xhigh": "极高", "max": "最高",
+}
+
+
 def translate(text, language):
     if language != "en":
-        return text
+        return THINKING_ZH.get(text, text)
     return EN.get(text, text)

@@ -1,6 +1,6 @@
 {
   "package_name": "card-pi",
-  "version": "0.0.5",
+  "version": "0.0.6",
   "app_name": "Card Pi",
   "bin_name": "card-pi",
   "description": "Pi coding agent frontend for CardputerZero",
